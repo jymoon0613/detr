@@ -1,3 +1,13 @@
+# DETR
+
+## About Repository
+
+🔥 This is the repository for Fater R-CNN code review.
+
+To see my review comments, you need to add the ***Better Comments*** extension in VS Code.
+
+The README for the original repository is below:
+
 **DE⫶TR**: End-to-End Object Detection with Transformers
 ========
 
