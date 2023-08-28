@@ -2,7 +2,7 @@
 
 ## About Repository
 
-🔥 This is the repository for Fater R-CNN code review.
+🔥 This is the repository for DETR code review.
 
 To see my review comments, you need to add the ***Better Comments*** extension in VS Code.
 
