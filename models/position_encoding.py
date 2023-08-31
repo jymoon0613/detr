@@ -16,35 +16,65 @@ class PositionEmbeddingSine(nn.Module):
     """
     def __init__(self, num_pos_feats=64, temperature=10000, normalize=False, scale=None):
         super().__init__()
-        self.num_pos_feats = num_pos_feats
-        self.temperature = temperature
-        self.normalize = normalize
+        self.num_pos_feats = num_pos_feats # ! 128
+        self.temperature = temperature # ! 10000
+        self.normalize = normalize # ! True
         if scale is not None and normalize is False:
             raise ValueError("normalize should be True if scale is passed")
+        
+        # ! scale = None
         if scale is None:
             scale = 2 * math.pi
         self.scale = scale
 
     def forward(self, tensor_list: NestedTensor):
+
+        # ! tensor_list.tensors = (B, C, H, W) -> backbone feature maps
+        # ! tensor_list.mask    = (B, H, W)    -> zero-padding masks
+
         x = tensor_list.tensors
         mask = tensor_list.mask
         assert mask is not None
+
+        # ! zero-padding masks를 반전시킴
+        # ! zero-padding된 영역은 False, 나머지 영역은 True
         not_mask = ~mask
-        y_embed = not_mask.cumsum(1, dtype=torch.float32)
-        x_embed = not_mask.cumsum(2, dtype=torch.float32)
+
+        # ! row 방향으로 누적합 계산
+        # ! column 방향으로 누적합 계산
+        # ! [
+        # !  [1, 1, 1],
+        # !  [2, 2, 2],
+        # !  [3, 3, 3],
+        # ! ]
+        y_embed = not_mask.cumsum(1, dtype=torch.float32) # ! (B, H, W)
+
+        # ! column 방향으로 누적합 계산
+        # ! [
+        # !  [1, 2, 3],
+        # !  [1, 2, 3],
+        # !  [1, 2, 3],
+        # ! ]
+        x_embed = not_mask.cumsum(2, dtype=torch.float32) # ! (B, H, W)
+
+        # ! Normalize 수행
         if self.normalize:
             eps = 1e-6
             y_embed = y_embed / (y_embed[:, -1:, :] + eps) * self.scale
             x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
 
-        dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=x.device)
-        dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
+        # ! positional encoding 계산
+        dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=x.device) # ! (128,)
+        dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats) # ! (128,)
 
-        pos_x = x_embed[:, :, :, None] / dim_t
-        pos_y = y_embed[:, :, :, None] / dim_t
-        pos_x = torch.stack((pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4).flatten(3)
-        pos_y = torch.stack((pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4).flatten(3)
-        pos = torch.cat((pos_y, pos_x), dim=3).permute(0, 3, 1, 2)
+        pos_x = x_embed[:, :, :, None] / dim_t # ! (B, H, W, 128)
+        pos_y = y_embed[:, :, :, None] / dim_t # ! (B, H, W, 128)
+        pos_x = torch.stack((pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4).flatten(3) # ! (B, H, W, 128)
+        pos_y = torch.stack((pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4).flatten(3) # ! (B, H, W, 128)
+        pos = torch.cat((pos_y, pos_x), dim=3).permute(0, 3, 1, 2) # ! (B, 256, H, W)
+
+        # ! pos = (B, 256, H, W) -> 계산된 positional encoding
+
         return pos
 
 
@@ -78,6 +108,10 @@ class PositionEmbeddingLearned(nn.Module):
 
 def build_position_encoding(args):
     N_steps = args.hidden_dim // 2
+
+    # ! args.position_embedding = 'sine'
+    # ! sine-cosine 기반의 positional encoding 사용함
+    # ! Transformer의 가장 basic한 positional encoding 기법
     if args.position_embedding in ('v2', 'sine'):
         # TODO find a better way of exposing other arguments
         position_embedding = PositionEmbeddingSine(N_steps, normalize=True)

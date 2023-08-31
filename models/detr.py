@@ -31,15 +31,40 @@ class DETR(nn.Module):
             aux_loss: True if auxiliary decoding losses (loss at each decoder layer) are to be used.
         """
         super().__init__()
-        self.num_queries = num_queries
+        
+        # ! Object queries의 수 
+        self.num_queries = num_queries # ! 100
+
+        # ! Transformer (endoer + decoder) 정의
         self.transformer = transformer
-        hidden_dim = transformer.d_model
+
+        # ! 정의된 Transformer의 feature dimensions
+        hidden_dim = transformer.d_model # ! 256
+
+        # ! Class prediction head 정의
+        # ! self.class_embed = nn.Linear(256, C + 1)
         self.class_embed = nn.Linear(hidden_dim, num_classes + 1)
+
+        # ! Bbox regression head 정의
+        # ! self.class_embed = MLP(256, 256, 4, 3)
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
+
+        # ! Object queries 정의
+        # ! self.query_embed = nn.Embedding(100, 256) 
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
+
+        # ! Transformer embedding layer 정의
+        # ! nn.Conv2d(2048, 256, kernel_size=1)
         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
+
+        # ! Backbone 정의
+        # ! Backbone은 feature maps 추출을 위한 base CNN (ResNet50)과, 
+        # ! 1D flattened된 features에 positional encoding을 더해주는 layer로 구성
+        # ! models.backbone 참고
         self.backbone = backbone
-        self.aux_loss = aux_loss
+
+        # ! Auxiliary loss 사용 여부
+        self.aux_loss = aux_loss # ! True
 
     def forward(self, samples: NestedTensor):
         """ The forward expects a NestedTensor, which consists of:
@@ -56,13 +81,33 @@ class DETR(nn.Module):
                - "aux_outputs": Optional, only returned when auxilary losses are activated. It is a list of
                                 dictionnaries containing the two above keys for each decoder layer.
         """
+
+        # ! samples.tensors = (B, 3, H0, W0) -> 입력 이미지, batch 내의 모든 입력 이미지의 H0, W0는 해당 batch의 maximum H0, maximum W0에 맞게 zero padding됨
+        # ! samples.mask    = (B, 3, H0, W0) -> batch 내의 입력 이미지를 동일한 크기로 맞춰주기 위해 zero padding을 추가한 영역에 대한 마스크 (padding된 영역은 True, 나머지는 False)
+
         if isinstance(samples, (list, torch.Tensor)):
             samples = nested_tensor_from_tensor_list(samples)
-        features, pos = self.backbone(samples)
 
+        # ! Backbone으로부터 feature maps와 positional encodings 추출
+        features, pos = self.backbone(samples)
+        # ! features = (B, 2048, H, W)의 feature maps와 (B, H, W)의 zero-padding masks의 pairs가 저장된 리스트
+        # ! pos      = (B, 256, H, W)의 계산된 positional encodings가 저장된 리스트
+
+        # ! features에 저장된 (feature maps, masks) pairs를 분리
         src, mask = features[-1].decompose()
+        # ! src  = (B, 2048, H, W)
+        # ! mask = (B, H, W)
+
         assert mask is not None
+
+        # ! Transformer에 입력
+        # ! 우선 feature maps에 대해 Transformer의 input embedding을 계산 -> 채널 수를 2048에서 256으로 축소
+        # ! self.input_proj(src)    = (B, 256, H, W) -> embedding된 feature maps
+        # ! mask                    = (B, H, W)      -> zero-padding masks
+        # ! self.query_embed.weight = (100, 256)     -> 정의된 trainable object queries
+        # ! pos[-1]                 = (B, 256, H, W) -> 계산된 positional encodings
         hs = self.transformer(self.input_proj(src), mask, self.query_embed.weight, pos[-1])[0]
+        # ! hs
 
         outputs_class = self.class_embed(hs)
         outputs_coord = self.bbox_embed(hs).sigmoid()
@@ -310,6 +355,10 @@ def build(args):
     # you should pass `num_classes` to be 2 (max_obj_id + 1).
     # For more details on this, check the following discussion
     # https://github.com/facebookresearch/detr/issues/108#issuecomment-650269223
+
+    # ! DETR 모델 및 loss 정의
+    # ! Classes의 개수 설정
+    # ! Num. objects + bg
     num_classes = 20 if args.dataset_file != 'coco' else 91
     if args.dataset_file == "coco_panoptic":
         # for panoptic, we just add a num_classes that is large enough to hold
@@ -317,10 +366,22 @@ def build(args):
         num_classes = 250
     device = torch.device(args.device)
 
+    # ! Backbone 정의
+    # ! Backbone은 feature maps 추출을 위한 base CNN (ResNet50)과, 
+    # ! 1D flattened된 features에 positional encoding을 더해주는 layer로 구성
+    # ! models.backbone 참고
     backbone = build_backbone(args)
+    # ! backbone = ResNet50 backbone과 position_embedding layer를 연결한 구조
 
+    # ! Transformer (endoer + decoder) 정의
+    # ! models.transformer 참고
     transformer = build_transformer(args)
+    # ! transformer = 
 
+    # ! DETR 모델 정의
+    # ! num_classes      = C
+    # ! args.num_queries = 100
+    # ! args.aux_loss    = True
     model = DETR(
         backbone,
         transformer,
@@ -328,7 +389,7 @@ def build(args):
         num_queries=args.num_queries,
         aux_loss=args.aux_loss,
     )
-    if args.masks:
+    if args.masks: # ! False
         model = DETRsegm(model, freeze_detr=(args.frozen_weights is not None))
     matcher = build_matcher(args)
     weight_dict = {'loss_ce': 1, 'loss_bbox': args.bbox_loss_coef}

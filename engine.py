@@ -26,10 +26,25 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     print_freq = 10
 
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
+
+        # ! samples.tensors = (B, 3, H0, W0) -> 입력 이미지, batch 내의 모든 입력 이미지의 H0, W0는 해당 batch의 maximum H0, maximum W0에 맞게 zero padding됨
+        # ! samples.mask    = (B, 3, H0, W0) -> batch 내의 입력 이미지를 동일한 크기로 맞춰주기 위해 zero padding을 추가한 영역에 대한 마스크 (padding된 영역은 True, 나머지는 False)
+        # ! targets         = (B,)           -> targets
+        # ! targets의 경우: 
+        # ! (1) gt_bboxes의 좌표, (2) gt_bboxes의 class labels, (3) image_id, 
+        # ! (4) 각 gt_bbox의 크기, (5) 이미지에 많은 개체가 포함되어 있는지 여부, (6) 원본 이미지 크기, (7) 현재 이미지 크기
+        # ! 가 dictionary 형태로 저장되어 있음
+
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
+        # ! model에 입력하여 예측값 계산
+        # ! models.detr 참고
+        # ! samples.tensors = (B, 3, H0, W0) -> 입력 이미지, batch 내의 모든 입력 이미지의 H0, W0는 해당 batch의 maximum H0, maximum W0에 맞게 zero padding됨
+        # ! samples.mask    = (B, 3, H0, W0) -> batch 내의 입력 이미지를 동일한 크기로 맞춰주기 위해 zero padding을 추가한 영역에 대한 마스크 (padding된 영역은 True, 나머지는 False)
         outputs = model(samples)
+        # ! outputs = 
+
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
