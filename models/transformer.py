@@ -44,12 +44,13 @@ class Transformer(nn.Module):
 
         # ! Transformer decoder 정의
         # ! 먼저 decoder layer 구조를 정의
-        # ! decoder_layer = TransformerEncoderLayer(256, 8, 2048, 0.1, "relu", False)
+        # ! decoder_layer = TransformerDecoderLayer(256, 8, 2048, 0.1, "relu", False)
         decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward,
                                                 dropout, activation, normalize_before)
         decoder_norm = nn.LayerNorm(d_model)
 
         # ! 정의된 decoder layer 구조를 바탕으로 decoder 정의
+        # ! self.decoder = TransformerDecoder(decoder_layer, 6, nn.LayerNorm(256), True)
         self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm,
                                           return_intermediate=return_intermediate_dec)
 
@@ -98,8 +99,19 @@ class Transformer(nn.Module):
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
         # ! memory = (HW, B, 256) -> 6개의 Transformer encoder layers를 통과한 output
 
+        # ! Encoder output을 decoder로 입력함
+        # ! tgt         = (100, B, 256) -> 결과를 저장할 tensor
+        # ! memory      = (HW, B, 256)  -> 6개의 Transformer encoder layers를 통과한 output
+        # ! mask        = (B, HW)       -> 1D로 flatten된 masks
+        # ! pos_embed   = (HW, B, 256)  -> 1D로 flatten된 positional encodings
+        # ! query_embed = (100, B, 256) -> object queries
         hs = self.decoder(tgt, memory, memory_key_padding_mask=mask,
                           pos=pos_embed, query_pos=query_embed)
+        # ! hs = (6, 100, B, 256) -> 각 decoder layer의 output = (100, B, 256)이 순서대로 총 6개 stack되어 있음
+
+        # ! hs.transpose(1, 2)                        = (6, B, 100, 256) -> 각 decoder layer의 output = (B, 100, 256)이 순서대로 총 6개 stack되어 있음
+        # ! memory.permute(1, 2, 0).view(bs, c, h, w) = (B, 256, H, W)   -> 6개의 encoder layers를 통과한 최종 Transformer encoder output
+
         return hs.transpose(1, 2), memory.permute(1, 2, 0).view(bs, c, h, w)
 
 
@@ -130,6 +142,7 @@ class TransformerEncoder(nn.Module):
 
             output = layer(output, src_mask=mask,
                            src_key_padding_mask=src_key_padding_mask, pos=pos)
+            # ! output = (HW, B, 256) -> 하나의 Transformer encoder layer를 통과한 output
 
         # ! Pre-normalization을 하지 않음
         # ! self.norm = None
@@ -145,10 +158,12 @@ class TransformerDecoder(nn.Module):
 
     def __init__(self, decoder_layer, num_layers, norm=None, return_intermediate=False):
         super().__init__()
+
+        # ! 정의된 decoder layer 구조를 바탕으로 6개의 decoder layer로 구성된 Transformer decoder 정의
         self.layers = _get_clones(decoder_layer, num_layers)
-        self.num_layers = num_layers
-        self.norm = norm
-        self.return_intermediate = return_intermediate
+        self.num_layers = num_layers # ! 6
+        self.norm = norm # ! nn.LayerNorm(256)
+        self.return_intermediate = return_intermediate # ! True
 
     def forward(self, tgt, memory,
                 tgt_mask: Optional[Tensor] = None,
@@ -157,27 +172,46 @@ class TransformerDecoder(nn.Module):
                 memory_key_padding_mask: Optional[Tensor] = None,
                 pos: Optional[Tensor] = None,
                 query_pos: Optional[Tensor] = None):
-        output = tgt
+        
+        # ! tgt                     = (100, B, 256) -> 결과를 저장할 tensor
+        # ! memory                  = (HW, B, 256)  -> 6개의 Transformer encoder layers를 통과한 output
+        # ! tgt_mask                = None
+        # ! memory_mask             = None
+        # ! tgt_key_padding_mask    = None
+        # ! memory_key_padding_mask = (B, HW)       -> 1D로 flatten된 masks
+        # ! pos                     = (HW, B, 256)  -> 1D로 flatten된 positional encodings
+        # ! query_pos               = (100, B, 256) -> object queries
 
+        output = tgt # ! (100, B, 256)
+
+        # ! 각 intermediate decoders의 output을 저장하기 위한 리스트 선언
         intermediate = []
 
+        # ! 6개의 decoder layer 통과
         for layer in self.layers:
             output = layer(output, memory, tgt_mask=tgt_mask,
                            memory_mask=memory_mask,
                            tgt_key_padding_mask=tgt_key_padding_mask,
                            memory_key_padding_mask=memory_key_padding_mask,
                            pos=pos, query_pos=query_pos)
-            if self.return_intermediate:
+            # ! output = (100, B, 256) -> 하나의 Transformer decoder layer를 통과한 output
+
+            # ! 모든 decoder layers의 output을 저장함
+            if self.return_intermediate: # ! True
                 intermediate.append(self.norm(output))
 
+        # ! self.norm = nn.LayerNorm(256)
         if self.norm is not None:
             output = self.norm(output)
             if self.return_intermediate:
                 intermediate.pop()
                 intermediate.append(output)
 
+        # ! True
         if self.return_intermediate:
             return torch.stack(intermediate)
+
+        # ! torch.stack(intermediate) = (6, 100, B, 256) -> 각 decoder layer의 output = (100, B, 256)이 순서대로 총 6개 stack되어 있음
 
         return output.unsqueeze(0)
 
@@ -229,11 +263,11 @@ class TransformerEncoderLayer(nn.Module):
         # ! pos                  = (HW, B, 256)
 
         # ! Positional encoding 반영하고 self-attention 수행
-        # ! q                    = (HW, B, 256)
-        # ! k                    = (HW, B, 256)
-        # ! value                = (HW, B, 256)
-        # ! src_mask             = None
-        # ! src_key_padding_mask = (B, HW)
+        # ! Q = q                    = (HW, B, 256)
+        # ! K = k                    = (HW, B, 256)
+        # ! V = src                  = (HW, B, 256)
+        # ! src_mask                 = None
+        # ! src_key_padding_mask     = (B, HW)
         q = k = self.with_pos_embed(src, pos)
         src2 = self.self_attn(q, k, value=src, attn_mask=src_mask,
                               key_padding_mask=src_key_padding_mask)[0]
@@ -251,7 +285,7 @@ class TransformerEncoderLayer(nn.Module):
         src = src + self.dropout2(src2) # ! (HW, B, 256)
         src = self.norm2(src) # ! (HW, B, 256)
 
-        # ! src = (HW, B, 256) -> 한 번의 Transformer encoder layer를 통과한 output
+        # ! src = (HW, B, 256) -> 하나의 Transformer encoder layer를 통과한 output
 
         return src
 
@@ -294,13 +328,33 @@ class TransformerDecoderLayer(nn.Module):
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1,
                  activation="relu", normalize_before=False):
         super().__init__()
+
+        # ! Decoder self-attention layer 정의
+        # ! Decoder는 하나의 decoder layer에서 모든 N개의 objects를 예측하므로 encoder self-attention과 같은 방식으로 정의됨 (masking X)
+        # ! self.self_attn = nn.MultiheadAttention(256, 8, dropout=0.1)
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+
+        # ! Encoder-decoder attention 정의
+        # ! Q = decoder의 queries, K, V = encoder의 key, values를 사용함
+        # ! self.multihead_attn = nn.MultiheadAttention(256, 8, dropout=0.1)
         self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         # Implementation of Feedforward model
+
+        # ! FFN layer 정의
+        # ! self.linear1 = nn.Linear(256, 2048)
+        # ! self.dropout = nn.Dropout(0.1)
+        # ! self.linear2 = nn.Linear(2048, 256)
         self.linear1 = nn.Linear(d_model, dim_feedforward)
         self.dropout = nn.Dropout(dropout)
         self.linear2 = nn.Linear(dim_feedforward, d_model)
 
+        # ! Normalization 및 dropout 정의
+        # ! self.norm1 = nn.LayerNorm(256)
+        # ! self.norm2 = nn.LayerNorm(256)
+        # ! self.norm3 = nn.LayerNorm(256)
+        # ! self.dropout1 = nn.Dropout(0.1)
+        # ! self.dropout2 = nn.Dropout(0.1)
+        # ! self.dropout3 = nn.Dropout(0.1)
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
         self.norm3 = nn.LayerNorm(d_model)
@@ -308,8 +362,8 @@ class TransformerDecoderLayer(nn.Module):
         self.dropout2 = nn.Dropout(dropout)
         self.dropout3 = nn.Dropout(dropout)
 
-        self.activation = _get_activation_fn(activation)
-        self.normalize_before = normalize_before
+        self.activation = _get_activation_fn(activation) # ! ReLU
+        self.normalize_before = normalize_before # ! False
 
     def with_pos_embed(self, tensor, pos: Optional[Tensor]):
         return tensor if pos is None else tensor + pos
@@ -321,20 +375,58 @@ class TransformerDecoderLayer(nn.Module):
                      memory_key_padding_mask: Optional[Tensor] = None,
                      pos: Optional[Tensor] = None,
                      query_pos: Optional[Tensor] = None):
+        
+        # ! tgt                     = (100, B, 256) -> 결과를 저장할 tensor
+        # ! memory                  = (HW, B, 256)  -> 6개의 Transformer encoder layers를 통과한 output
+        # ! tgt_mask                = None
+        # ! memory_mask             = None
+        # ! tgt_key_padding_mask    = None
+        # ! memory_key_padding_mask = (B, HW)       -> 1D로 flatten된 masks
+        # ! pos                     = (HW, B, 256)  -> 1D로 flatten된 positional encodings
+        # ! query_pos               = (100, B, 256) -> object queries
+
+        # ! Positional encoding 반영하고 decoder self-attention 수행
+        # ! Q = q                    = (100, B, 256)
+        # ! K = k                    = (100, B, 256)
+        # ! V = tgt                  = (100, B, 256)
+        # ! tgt_mask                 = None
+        # ! tgt_key_padding_mask     = None
         q = k = self.with_pos_embed(tgt, query_pos)
         tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask,
                               key_padding_mask=tgt_key_padding_mask)[0]
-        tgt = tgt + self.dropout1(tgt2)
-        tgt = self.norm1(tgt)
+        # ! nn.MultiheadAttention의 output은 self-attention output, attention weights로 구성된 tuple임
+        # ! tgt2는 self-attention output만을 선택함 = (100, B, 256)
+
+        # ! Residual connection + dropout, normalization 적용 
+        tgt = tgt + self.dropout1(tgt2) # ! (100, B, 256)
+        tgt = self.norm1(tgt) # ! (100, B, 256)
+
+        # ! Positional encoding 반영하고 encoder-decoder attention 적용
+        # ! Q = self.with_pos_embed(memory, pos)    = (100, B, 256)
+        # ! K = self.with_pos_embed(tgt, query_pos) = (HW, B, 256)
+        # ! V = memory                              = (HW, B, 256)
+        # ! memory_mask                             = None
+        # ! memory_key_padding_mask                 = (B, HW)
         tgt2 = self.multihead_attn(query=self.with_pos_embed(tgt, query_pos),
                                    key=self.with_pos_embed(memory, pos),
                                    value=memory, attn_mask=memory_mask,
                                    key_padding_mask=memory_key_padding_mask)[0]
-        tgt = tgt + self.dropout2(tgt2)
-        tgt = self.norm2(tgt)
-        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt))))
-        tgt = tgt + self.dropout3(tgt2)
-        tgt = self.norm3(tgt)
+        # ! nn.MultiheadAttention의 output은 self-attention output, attention weights로 구성된 tuple임
+        # ! tgt2는 self-attention output만을 선택함 = (100, B, 256)
+        
+        # ! Residual connection + dropout, normalization 적용 
+        tgt = tgt + self.dropout2(tgt2) # ! (100, B, 256)
+        tgt = self.norm2(tgt) # ! (100, B, 256)
+
+        # ! FFN 수행
+        tgt2 = self.linear2(self.dropout(self.activation(self.linear1(tgt)))) # ! (100, B, 256)
+
+        # ! Residual connection + dropout, normalization 적용
+        tgt = tgt + self.dropout3(tgt2) # ! (100, B, 256)
+        tgt = self.norm3(tgt) # ! (100, B, 256)
+
+        # ! tgt = (100, B, 256) -> 하나의 Transformer decoder layer를 통과한 output 
+
         return tgt
 
     def forward_pre(self, tgt, memory,
@@ -367,9 +459,25 @@ class TransformerDecoderLayer(nn.Module):
                 memory_key_padding_mask: Optional[Tensor] = None,
                 pos: Optional[Tensor] = None,
                 query_pos: Optional[Tensor] = None):
+        
+        # ! tgt                     = (100, B, 256) -> 결과를 저장할 tensor
+        # ! memory                  = (HW, B, 256)  -> 6개의 Transformer encoder layers를 통과한 output
+        # ! tgt_mask                = None
+        # ! memory_mask             = None
+        # ! tgt_key_padding_mask    = None
+        # ! memory_key_padding_mask = (B, HW)       -> 1D로 flatten된 masks
+        # ! pos                     = (HW, B, 256)  -> 1D로 flatten된 positional encodings
+        # ! query_pos               = (100, B, 256) -> object queries
+
+        # ! Pre-normalization 하지 않음 
         if self.normalize_before:
             return self.forward_pre(tgt, memory, tgt_mask, memory_mask,
                                     tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos)
+        
+        # ! output 계산 
+        # ! self.forward_post(tgt, memory, tgt_mask, memory_mask, tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos) 
+        # ! = (100, B, 256) -> 한 번의 Transformer decoder layer를 통과한 output
+
         return self.forward_post(tgt, memory, tgt_mask, memory_mask,
                                  tgt_key_padding_mask, memory_key_padding_mask, pos, query_pos)
 

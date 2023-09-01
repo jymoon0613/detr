@@ -30,7 +30,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         # ! samples.tensors = (B, 3, H0, W0) -> 입력 이미지, batch 내의 모든 입력 이미지의 H0, W0는 해당 batch의 maximum H0, maximum W0에 맞게 zero padding됨
         # ! samples.mask    = (B, 3, H0, W0) -> batch 내의 입력 이미지를 동일한 크기로 맞춰주기 위해 zero padding을 추가한 영역에 대한 마스크 (padding된 영역은 True, 나머지는 False)
         # ! targets         = (B,)           -> targets
-        # ! targets의 경우: 
+        # ! targets의 경우 전체 B개의 각 이미지마다: 
         # ! (1) gt_bboxes의 좌표, (2) gt_bboxes의 class labels, (3) image_id, 
         # ! (4) 각 gt_bbox의 크기, (5) 이미지에 많은 개체가 포함되어 있는지 여부, (6) 원본 이미지 크기, (7) 현재 이미지 크기
         # ! 가 dictionary 형태로 저장되어 있음
@@ -43,10 +43,23 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         # ! samples.tensors = (B, 3, H0, W0) -> 입력 이미지, batch 내의 모든 입력 이미지의 H0, W0는 해당 batch의 maximum H0, maximum W0에 맞게 zero padding됨
         # ! samples.mask    = (B, 3, H0, W0) -> batch 내의 입력 이미지를 동일한 크기로 맞춰주기 위해 zero padding을 추가한 영역에 대한 마스크 (padding된 영역은 True, 나머지는 False)
         outputs = model(samples)
-        # ! outputs = 
+        # ! outputs = 결과 저장 dictionary
+        # ! outputs['pred_logits'] = (B, 100, C+1) -> 최종 decoder layer의 class prediction
+        # ! outputs['pred_boxes']  = (B, 100, 4)   -> 최종 decoder layer의 bbox prediction
+        # ! outputs['aux_outputs'] = 최종 decoder layer를 제외한 나머지 5개의 decoder layer의 output이 
+        # ! -> {'pred_logits': (B, 100, C+1), 'pred_boxes': (B, 100, 4)}의 dictionary가 총 5개 포함된 리스트로 저장되어 있음
 
+        # ! Loss 계산
+        # ! outputs = 결과 저장 dictionary (위 참고)
+        # ! targets = (B,) -> gt_targets
         loss_dict = criterion(outputs, targets)
+        # ! loss_dict는 최종 decoder layer(6번째)에 대한 'loss_ce', 'class_error', 'loss_bbox', 'loss_giou', 'cardinality_error'와
+        # ! 나머지 5개의 decoder layeres에 대한 'loss_ce_i', 'loss_bbox_i', 'loss_giou_i', 'cardinality_error_i'를 저장하고 있는 dictionary임 (i는 decoder layer의 순서)
+
+        # ! Loss 가중치 dictionary 추출
         weight_dict = criterion.weight_dict
+
+        # ! 가중치 반영하여 total loss계산
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
 
         # reduce losses over all GPUs for logging purposes
