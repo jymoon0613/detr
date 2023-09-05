@@ -31,9 +31,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         # ! samples.mask    = (B, 3, H0, W0) -> batch 내의 입력 이미지를 동일한 크기로 맞춰주기 위해 zero padding을 추가한 영역에 대한 마스크 (padding된 영역은 True, 나머지는 False)
         # ! targets         = (B,)           -> targets
         # ! targets의 경우 전체 B개의 각 이미지마다: 
-        # ! (1) gt_bboxes의 좌표, (2) gt_bboxes의 class labels, (3) image_id, 
-        # ! (4) 각 gt_bbox의 크기, (5) 이미지에 많은 개체가 포함되어 있는지 여부, (6) 원본 이미지 크기, (7) 현재 이미지 크기
-        # ! 가 dictionary 형태로 저장되어 있음
+        # ! (1) gt_bboxes의 좌표 = (n,4), (2) gt_bboxes의 class labels = (n,), (3) image_id = (1,), 
+        # ! (4) 각 gt_bbox의 크기 = (n,), (5) 이미지에 많은 개체가 포함되어 있는지 여부 = (n,), (6) 원본 이미지 크기 = (HH,WW), (7) 현재 이미지 크기 = (H0,W0)
+        # ! 가 dictionary 형태로 저장되어 있음 (각 이미지마다 n개의 gt_bboxes가 존재한다고 가정)
 
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]

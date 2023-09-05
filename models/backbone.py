@@ -68,7 +68,7 @@ class BackboneBase(nn.Module):
 
         for name, parameter in backbone.named_parameters():
             # ! 만약 backbone network를 훈련시키지 않는다면 모든 parameters를 freeze시킴
-            # ! Backbone network를 훈련시키는 경우 layer1만 사용하지 않음
+            # ! Backbone network를 훈련시키는 경우 layer1만 freeze함
             if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
                 parameter.requires_grad_(False)
 
@@ -158,7 +158,7 @@ class Joiner(nn.Sequential):
         pos = []
         for name, x in xs.items():
 
-            # ! output list에 backbone feature maps = (B, 2048, H, W) 저장
+            # ! output list에 backbone feature maps = (B, 2048, H, W)와 zero-padding masks = (B, H, W) 저장
             out.append(x)
             # position encoding
             # ! Positional encoding 계산 및 저장

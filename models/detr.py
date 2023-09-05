@@ -133,7 +133,7 @@ class DETR(nn.Module):
         # ! out = 결과 저장 dictionary
         # ! out['pred_logits'] = (B, 100, C+1) -> 최종 decoder layer의 class prediction
         # ! out['pred_boxes']  = (B, 100, C+1) -> 최종 decoder layer의 bbox prediction
-        # ! out['aux_outputs'] = (B, 100, C+1) -> 최종 decoder layer를 제외한 나머지 5개의 decoder layer의 output이 
+        # ! out['aux_outputs'] = 최종 decoder layer를 제외한 나머지 5개의 decoder layer의 output이 
         # ! -> {'pred_logits': (B, 100, C+1), 'pred_boxes': (B, 100, 4)}의 dictionary가 총 5개 포함된 리스트로 저장되어 있음
 
         return out
@@ -198,10 +198,10 @@ class SetCriterion(nn.Module):
         # ! -> {'pred_logits': (B, 100, C+1), 'pred_boxes': (B, 100, 4)}의 dictionary가 총 5개 포함된 리스트로 저장되어 있음
         # ! targets = (B,) -> gt_targets
         # ! targets의 경우 전체 B개의 각 이미지마다: 
-        # ! (1) gt_bboxes의 좌표, (2) gt_bboxes의 class labels, (3) image_id, 
-        # ! (4) 각 gt_bbox의 크기, (5) 이미지에 많은 개체가 포함되어 있는지 여부, (6) 원본 이미지 크기, (7) 현재 이미지 크기
-        # ! 가 dictionary 형태로 저장되어 있음
-        # ! indices = (B, (m,m)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 m개의 gt_bboxes가 존재한다고 가정)
+        # ! (1) gt_bboxes의 좌표 = (n,4), (2) gt_bboxes의 class labels = (n,), (3) image_id = (1,), 
+        # ! (4) 각 gt_bbox의 크기 = (n,), (5) 이미지에 많은 개체가 포함되어 있는지 여부 = (n,), (6) 원본 이미지 크기 = (HH,WW), (7) 현재 이미지 크기 = (H0,W0)
+        # ! 가 dictionary 형태로 저장되어 있음 (각 이미지마다 n개의 gt_bboxes가 존재한다고 가정)
+        # ! indices = (B, (n,n)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 n개의 gt_bboxes가 존재한다고 가정)
         # ! num_boxes = batch 내에 존재하는 총 gt_bboxes의 수를 계산
 
         assert 'pred_logits' in outputs
@@ -210,13 +210,13 @@ class SetCriterion(nn.Module):
 
         # ! loss 계산을 위한 index 생성
         idx = self._get_src_permutation_idx(indices)
-        # ! idx    = (Bm, Bm)
-        # ! idx[0] = (Bm,) -> 0 ~ (B-1)까지의 batch index가 flatten되어 나열되어 있음
-        # ! idx[1] = (Bm,) -> 모든 Bm개의 matching indices가 flatten되어 나열되어 있음
+        # ! idx    = (Bn, Bn)
+        # ! idx[0] = (Bn,) -> 0 ~ (B-1)까지의 batch index가 flatten되어 나열되어 있음
+        # ! idx[1] = (Bn,) -> 모든 Bn개의 matching indices가 flatten되어 나열되어 있음
 
-        # ! 각 이미지에 존재하는 m개의 gt_label을 matching indices에 따라 정렬한 뒤 나열함
+        # ! 각 이미지에 존재하는 n개의 gt_label을 matching indices에 따라 정렬한 뒤 나열함
         target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
-        # ! target_classes_o = (Bm,)
+        # ! target_classes_o = (Bn,)
 
         # ! target값을 생성함
         # ! 먼저 (B, 100) 크기의 tensor를 생성하고, 모든 값을 C로 채움
@@ -238,8 +238,8 @@ class SetCriterion(nn.Module):
         if log:
             # TODO this should probably be a separate loss, not hacked in this one here
             # ! 추가로 classification error를 계산하고 저장
-            # ! src_logits[idx]  = (Bm,) -> gt_bbox를 할당받은 예측값들의 class 예측값만 선택
-            # ! target_classes_o = (Bm,) -> 각 이미지에 존재하는 m개의 gt_label을 matching indices에 따라 정렬한 뒤 나열함
+            # ! src_logits[idx]  = (Bn,) -> gt_bbox를 할당받은 예측값들의 class 예측값만 선택
+            # ! target_classes_o = (Bn,) -> 각 이미지에 존재하는 n개의 gt_label을 matching indices에 따라 정렬한 뒤 나열함
             losses['class_error'] = 100 - accuracy(src_logits[idx], target_classes_o)[0]
             # ! Top-1 error를 계산하고 저장함
 
@@ -258,10 +258,10 @@ class SetCriterion(nn.Module):
         # ! -> {'pred_logits': (B, 100, C+1), 'pred_boxes': (B, 100, 4)}의 dictionary가 총 5개 포함된 리스트로 저장되어 있음
         # ! targets = (B,) -> gt_targets
         # ! targets의 경우 전체 B개의 각 이미지마다: 
-        # ! (1) gt_bboxes의 좌표, (2) gt_bboxes의 class labels, (3) image_id, 
-        # ! (4) 각 gt_bbox의 크기, (5) 이미지에 많은 개체가 포함되어 있는지 여부, (6) 원본 이미지 크기, (7) 현재 이미지 크기
-        # ! 가 dictionary 형태로 저장되어 있음
-        # ! indices = (B, (m,m)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 m개의 gt_bboxes가 존재한다고 가정)
+        # ! (1) gt_bboxes의 좌표 = (n,4), (2) gt_bboxes의 class labels = (n,), (3) image_id = (1,), 
+        # ! (4) 각 gt_bbox의 크기 = (n,), (5) 이미지에 많은 개체가 포함되어 있는지 여부 = (n,), (6) 원본 이미지 크기 = (HH,WW), (7) 현재 이미지 크기 = (H0,W0)
+        # ! 가 dictionary 형태로 저장되어 있음 (각 이미지마다 n개의 gt_bboxes가 존재한다고 가정)
+        # ! indices = (B, (n,n)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 n개의 gt_bboxes가 존재한다고 가정)
         # ! num_boxes = batch 내에 존재하는 총 gt_bboxes의 수를 계산
 
         # ! Class 예측값만 추출
@@ -278,7 +278,7 @@ class SetCriterion(nn.Module):
 
         # ! Cardinality error를 계산함
         # ! 'bg'로 예측에 대한 absolute error
-        card_err = F.l1_loss(card_pred.float(), tgt_lengths.float())
+        card_err = F.l1_loss(card_pred.float(), tgt_lengths.float()) # ! -> scalar loss value
         losses = {'cardinality_error': card_err}
         return losses
 
@@ -296,44 +296,44 @@ class SetCriterion(nn.Module):
         # ! -> {'pred_logits': (B, 100, C+1), 'pred_boxes': (B, 100, 4)}의 dictionary가 총 5개 포함된 리스트로 저장되어 있음
         # ! targets = (B,) -> gt_targets
         # ! targets의 경우 전체 B개의 각 이미지마다: 
-        # ! (1) gt_bboxes의 좌표, (2) gt_bboxes의 class labels, (3) image_id, 
-        # ! (4) 각 gt_bbox의 크기, (5) 이미지에 많은 개체가 포함되어 있는지 여부, (6) 원본 이미지 크기, (7) 현재 이미지 크기
-        # ! 가 dictionary 형태로 저장되어 있음
-        # ! indices = (B, (m,m)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 m개의 gt_bboxes가 존재한다고 가정)
+        # ! (1) gt_bboxes의 좌표 = (n,4), (2) gt_bboxes의 class labels = (n,), (3) image_id = (1,), 
+        # ! (4) 각 gt_bbox의 크기 = (n,), (5) 이미지에 많은 개체가 포함되어 있는지 여부 = (n,), (6) 원본 이미지 크기 = (HH,WW), (7) 현재 이미지 크기 = (H0,W0)
+        # ! 가 dictionary 형태로 저장되어 있음 (각 이미지마다 n개의 gt_bboxes가 존재한다고 가정)
+        # ! indices = (B, (n,n)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 n개의 gt_bboxes가 존재한다고 가정)
         # ! num_boxes = batch 내에 존재하는 총 gt_bboxes의 수를 계산
 
         assert 'pred_boxes' in outputs
 
         # ! loss 계산을 위한 index 생성
         idx = self._get_src_permutation_idx(indices)
-        # ! idx    = (Bm, Bm)
-        # ! idx[0] = (Bm,) -> 0 ~ (B-1)까지의 batch index가 flatten되어 나열되어 있음
-        # ! idx[1] = (Bm,) -> 모든 Bm개의 matching indices가 flatten되어 나열되어 있음
+        # ! idx    = (Bn, Bn)
+        # ! idx[0] = (Bn,) -> 0 ~ (B-1)까지의 batch index가 flatten되어 나열되어 있음
+        # ! idx[1] = (Bn,) -> 모든 Bn개의 matching indices가 flatten되어 나열되어 있음
 
         # ! (B, 100, 4)의 bbox 예측값 중, gt_bbox와 matching에 성공한 예측값만 선택함
         src_boxes = outputs['pred_boxes'][idx]
-        # ! src_boxes = (Bm, 4)
+        # ! src_boxes = (Bn, 4)
 
-        # ! 각 이미지에 존재하는 m개의 gt_bbox 좌표를 matching indices에 따라 정렬한 뒤 나열함
+        # ! 각 이미지에 존재하는 n개의 gt_bbox 좌표를 matching indices에 따라 정렬한 뒤 나열함
         target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
-        # ! target_boxes = (Bm, 4)
+        # ! target_boxes = (Bn, 4)
 
         # ! L1 loss 계산하고 저장
-        loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
+        loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none') # ! -> scalar loss value
 
         losses = {}
         losses['loss_bbox'] = loss_bbox.sum() / num_boxes
 
         # ! GIoU loss를 계산하고 저장함
         # ! GIoU loss = 1 - GIoU
-        # ! box_ops.generalized_box_iou(box_ops.box_cxcywh_to_xyxy(src_boxes), box_ops.box_cxcywh_to_xyxy(target_boxes))는 (Bm, 4)의 예측 bbox와 (Bm, 4)의 gt_bboxes의 bbox 형식을
+        # ! box_ops.generalized_box_iou(box_ops.box_cxcywh_to_xyxy(src_boxes), box_ops.box_cxcywh_to_xyxy(target_boxes))는 (Bn, 4)의 예측 bbox와 (Bn, 4)의 gt_bboxes의 bbox 형식을
         # ! 기존 (x, y, w, h)에서 (x1, y1, x2, y2)로 변경하고, GIoU 계산 = (Bn, Bn)
         # ! torch.diag은 2차원 tensor가 주어졌을 때 tensor의 대각 요소를 1D vector로 출력함
         # ! 즉, torch.diag((Bn, Bn))은 매칭된 예측 bbox와 gt_bbox 간의 GIoU를 출력함 = (Bn,)
         loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(
             box_ops.box_cxcywh_to_xyxy(src_boxes),
             box_ops.box_cxcywh_to_xyxy(target_boxes)))
-        losses['loss_giou'] = loss_giou.sum() / num_boxes
+        losses['loss_giou'] = loss_giou.sum() / num_boxes # ! -> scalar loss value
         return losses
 
     def loss_masks(self, outputs, targets, indices, num_boxes):
@@ -368,19 +368,19 @@ class SetCriterion(nn.Module):
     def _get_src_permutation_idx(self, indices):
         # permute predictions following indices
 
-        # ! indices = (B, (m,m)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 m개의 gt_bboxes가 존재한다고 가정)
+        # ! indices = (B, (n,n)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 n개의 gt_bboxes가 존재한다고 가정)
 
         # ! Batch index 생성
         batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
-        # ! batch_idx = (Bm,) -> 0 ~ (B-1)까지의 batch index가 flatten되어 나열되어 있음
-        # ! 이떄 우리는 모든 이미지에 정확히 m개의 gt_bboxes가 존재한다고 가정하므로, 
-        # ! 0 ~ m = 0, (m+1) ~ 2m = 1, ...의 형태로 구성되어 있음
+        # ! batch_idx = (Bn,) -> 0 ~ (B-1)까지의 batch index가 flatten되어 나열되어 있음
+        # ! 이떄 우리는 모든 이미지에 정확히 n개의 gt_bboxes가 존재한다고 가정하므로, 
+        # ! 0 ~ n = 0, (n+1) ~ 2n = 1, ...의 형태로 구성되어 있음
 
         # ! 예측값의 matching index를 추출
         src_idx = torch.cat([src for (src, _) in indices])
-        # ! src_idx = (Bm,) -> 모든 Bm개의 matching indices가 flatten되어 나열되어 있음
-        # ! 이떄 우리는 모든 이미지에 정확히 m개의 gt_bboxes가 존재한다고 가정하므로, 
-        # ! 0 ~ m = 첫 번째 이미지에서 매칭에 성공한 예측값의 indices, (m+1) ~ 2m = 두 번째 이미지에서 매칭에 성공한 예측값의 indices, ...의 형태로 구성되어 있음
+        # ! src_idx = (Bn,) -> 모든 Bn개의 matching indices가 flatten되어 나열되어 있음
+        # ! 이떄 우리는 모든 이미지에 정확히 n개의 gt_bboxes가 존재한다고 가정하므로, 
+        # ! 0 ~ n = 첫 번째 이미지에서 매칭에 성공한 예측값의 indices, (n+1) ~ 2n = 두 번째 이미지에서 매칭에 성공한 예측값의 indices, ...의 형태로 구성되어 있음
 
         return batch_idx, src_idx
 
@@ -415,9 +415,9 @@ class SetCriterion(nn.Module):
         # ! -> {'pred_logits': (B, 100, C+1), 'pred_boxes': (B, 100, 4)}의 dictionary가 총 5개 포함된 리스트로 저장되어 있음
         # ! targets = (B,) -> gt_targets
         # ! targets의 경우 전체 B개의 각 이미지마다: 
-        # ! (1) gt_bboxes의 좌표, (2) gt_bboxes의 class labels, (3) image_id, 
-        # ! (4) 각 gt_bbox의 크기, (5) 이미지에 많은 개체가 포함되어 있는지 여부, (6) 원본 이미지 크기, (7) 현재 이미지 크기
-        # ! 가 dictionary 형태로 저장되어 있음
+        # ! (1) gt_bboxes의 좌표 = (n,4), (2) gt_bboxes의 class labels = (n,), (3) image_id = (1,), 
+        # ! (4) 각 gt_bbox의 크기 = (n,), (5) 이미지에 많은 개체가 포함되어 있는지 여부 = (n,), (6) 원본 이미지 크기 = (HH,WW), (7) 현재 이미지 크기 = (H0,W0)
+        # ! 가 dictionary 형태로 저장되어 있음 (각 이미지마다 n개의 gt_bboxes가 존재한다고 가정)
 
         # ! 최종 decoder layer의 output만을 추출
         # ! outputs_without_aux['pred_logits'] = (B, 100, C+1) -> 최종 decoder layer의 class prediction
@@ -427,7 +427,7 @@ class SetCriterion(nn.Module):
         # Retrieve the matching between the outputs of the last layer and the targets
         # ! 100개의 predictions와 gt_bboxes의 optimal bipartite matching을 찾음
         indices = self.matcher(outputs_without_aux, targets)
-        # ! indices = (B, (m,m)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 m개의 gt_bboxes가 존재한다고 가정)
+        # ! indices = (B, (n,n)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 n개의 gt_bboxes가 존재한다고 가정)
 
         # Compute the average number of target boxes accross all nodes, for normalization purposes
         # ! Normalization을 위해 batch 내에 존재하는 총 gt_bboxes의 수를 계산
@@ -451,10 +451,10 @@ class SetCriterion(nn.Module):
             # ! -> {'pred_logits': (B, 100, C+1), 'pred_boxes': (B, 100, 4)}의 dictionary가 총 5개 포함된 리스트로 저장되어 있음
             # ! targets = (B,) -> gt_targets
             # ! targets의 경우 전체 B개의 각 이미지마다: 
-            # ! (1) gt_bboxes의 좌표, (2) gt_bboxes의 class labels, (3) image_id, 
-            # ! (4) 각 gt_bbox의 크기, (5) 이미지에 많은 개체가 포함되어 있는지 여부, (6) 원본 이미지 크기, (7) 현재 이미지 크기
-            # ! 가 dictionary 형태로 저장되어 있음
-            # ! indices = (B, (m,m)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 m개의 gt_bboxes가 존재한다고 가정)
+            # ! (1) gt_bboxes의 좌표 = (n,4), (2) gt_bboxes의 class labels = (n,), (3) image_id = (1,), 
+            # ! (4) 각 gt_bbox의 크기 = (n,), (5) 이미지에 많은 개체가 포함되어 있는지 여부 = (n,), (6) 원본 이미지 크기 = (HH,WW), (7) 현재 이미지 크기 = (H0,W0)
+            # ! 가 dictionary 형태로 저장되어 있음 (각 이미지마다 n개의 gt_bboxes가 존재한다고 가정)
+            # ! indices = (B, (n,n)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 n개의 gt_bboxes가 존재한다고 가정)
             # ! num_boxes = batch 내에 존재하는 총 gt_bboxes의 수를 계산
             losses.update(self.get_loss(loss, outputs, targets, indices, num_boxes))
 
@@ -472,7 +472,7 @@ class SetCriterion(nn.Module):
 
                 # ! 100개의 predictions와 gt_bboxes의 optimal bipartite matching을 찾음
                 indices = self.matcher(aux_outputs, targets)
-                # ! indices = (B, (m,m)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 m개의 gt_bboxes가 존재한다고 가정)
+                # ! indices = (B, (n,n)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 n개의 gt_bboxes가 존재한다고 가정)
 
                 # ! Auxiliary outputs에 대해 모든 losses를 계산함
                 for loss in self.losses:
@@ -491,11 +491,12 @@ class SetCriterion(nn.Module):
                     # ! loss = 계산할 loss의 종류 ('labels', 'boxes', 'cardinality')
                     # ! aux_outputs = {'pred_logits': (B, 100, C+1), 'pred_boxes': (B, 100, 4)} -> i번째 decoder layer의 output
                     # ! targets = (B,) -> gt_targets
+                    # ! targets = (B,) -> gt_targets
                     # ! targets의 경우 전체 B개의 각 이미지마다: 
-                    # ! (1) gt_bboxes의 좌표, (2) gt_bboxes의 class labels, (3) image_id, 
-                    # ! (4) 각 gt_bbox의 크기, (5) 이미지에 많은 개체가 포함되어 있는지 여부, (6) 원본 이미지 크기, (7) 현재 이미지 크기
-                    # ! 가 dictionary 형태로 저장되어 있음
-                    # ! indices = (B, (m,m)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 m개의 gt_bboxes가 존재한다고 가정)
+                    # ! (1) gt_bboxes의 좌표 = (n,4), (2) gt_bboxes의 class labels = (n,), (3) image_id = (1,), 
+                    # ! (4) 각 gt_bbox의 크기 = (n,), (5) 이미지에 많은 개체가 포함되어 있는지 여부 = (n,), (6) 원본 이미지 크기 = (HH,WW), (7) 현재 이미지 크기 = (H0,W0)
+                    # ! 가 dictionary 형태로 저장되어 있음 (각 이미지마다 n개의 gt_bboxes가 존재한다고 가정)
+                    # ! indices = (B, (n,n)) -> 전체 B개의 각 이미지마다 최적 matching의 결과가 리스트에 저장되어 있음 (모든 이미지에 정확히 n개의 gt_bboxes가 존재한다고 가정)
                     # ! num_boxes = batch 내에 존재하는 총 gt_bboxes의 수를 계산
                     l_dict = self.get_loss(loss, aux_outputs, targets, indices, num_boxes, **kwargs)
 
@@ -569,7 +570,7 @@ def build(args):
 
     # ! DETR 모델 및 loss 정의
     # ! Classes의 개수 설정
-    # ! Num. objects + bg
+    # ! Num. objects + bg = C
     num_classes = 20 if args.dataset_file != 'coco' else 91
     if args.dataset_file == "coco_panoptic":
         # for panoptic, we just add a num_classes that is large enough to hold
@@ -633,7 +634,7 @@ def build(args):
         losses += ["masks"]
 
     # ! Loss function 생성
-    # ! num_classes   = C (class의 수)
+    # ! num_classes   = C
     # ! matcher       = bipartite matching을 위한 matcher
     # ! weight_dict   = loss 가중치 dictionary
     # ! args.eos_coef = 0.1 ('no-object(bg) class'의 classification error에 대한 가중치)
